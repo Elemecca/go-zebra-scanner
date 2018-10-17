@@ -25,14 +25,11 @@ func main() {
 	}
 
 	log.Info("device opened, running")
+	server := Server{
+		ListenAddress: "localhost:4141",
+	}
+	go server.Serve()
 	for {
-		event := <-dev.EventChan
-		switch event := event.(type) {
-		case snapi.ScanEvent:
-			log.WithFields(log.Fields{
-				"codeType": event.CodeType,
-				"data":     event.Data,
-			}).Debug("scanned")
-		}
+		server.Broadcast(<-dev.EventChan)
 	}
 }
