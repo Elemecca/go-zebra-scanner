@@ -51,7 +51,7 @@ type ackMsg struct {
 }
 
 type ScanEvent struct {
-	CodeType uint16
+	CodeType string
 	Data     []byte
 }
 
@@ -150,8 +150,16 @@ func (dev *Device) handleScan(packet scanPacket) {
 			}).Debug("scan complete")
 		}
 
+		codeType, hit := codeTypes[dev.scan.codeType]
+		if !hit {
+			codeType = "unknown"
+			log.WithFields(log.Fields{
+				"codeType": dev.scan.codeType,
+			}).Warn("received unknown codeType")
+		}
+
 		dev.EventChan <- ScanEvent{
-			CodeType: dev.scan.codeType,
+			CodeType: codeType,
 			Data:     dev.scan.data,
 		}
 
