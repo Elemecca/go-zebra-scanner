@@ -52,16 +52,16 @@ type ackMsg struct {
 	param  byte
 }
 
-type scanMsg struct {
+type ScanEvent struct {
+	CodeType uint16
+	Data     []byte
+}
+
+type scanPacket struct {
 	packetCount uint16
 	packetIndex uint16
 	codeType    uint16
 	data        []byte
-}
-
-type ScanEvent struct {
-	codeType uint16
-	data     []byte
 }
 
 type Device struct {
@@ -69,7 +69,7 @@ type Device struct {
 	EventChan  chan interface{}
 	ackInChan  chan ackMsg
 	ackOutChan chan []byte
-	scanChan   chan scanMsg
+	scan       scanPacket
 }
 
 func (info DeviceInfo) Open() (*Device, error) {
@@ -83,11 +83,9 @@ func (info DeviceInfo) Open() (*Device, error) {
 		EventChan:   make(chan interface{}, 20),
 		ackInChan:   make(chan ackMsg),
 		ackOutChan:  make(chan []byte),
-		scanChan:    make(chan scanMsg),
 	}
 
 	go dev.readLoop()
-	go dev.scanLoop()
 	go dev.writeLoop()
 
 	return dev, nil
@@ -99,6 +97,79 @@ func (dev *Device) writeStatus(cmdId byte, status byte) {
 
 func (dev *Device) writeAck(cmdId byte) {
 	dev.writeStatus(cmdId, statusSuccess)
+}
+
+func (dev *Device) clearScan() {
+	dev.scan.packetCount = 0
+	dev.scan.packetIndex = 0
+	dev.scan.codeType = 0
+	dev.scan.data = nil
+}
+
+func (dev *Device) handleScan(packet scanPacket) {
+	log.Printf(
+		"snapi: debug: received scan packet %d/%d, codeType %04x, size %d\n%s",
+		packet.packetIndex + 1, packet.packetCount, packet.codeType,
+		len(packet.data), hex.Dump(packet.data),
+	)
+
+	if dev.scan.data == nil {
+		log.Println("snapi: debug: starting new scan")
+		dev.scan.packetCount = packet.packetCount
+		dev.scan.packetIndex = 0
+		dev.scan.codeType = packet.codeType
+		dev.scan.data = make([]byte, 0, int(packet.packetCount)*len(packet.data))
+	} else {
+		if packet.packetCount != dev.scan.packetCount {
+			// TODO: error packet packetCount mismatch
+			log.Printf(
+				"snapi: error: received scan packet %d/%d, expected %d/%d",
+				packet.packetIndex + 1, packet.packetCount,
+				dev.scan.packetIndex + 1, dev.scan.packetCount,
+			)
+			dev.clearScan()
+			return
+		}
+
+		if packet.codeType != dev.scan.codeType {
+			// TODO: error packet codeType mismatch
+			log.Printf(
+				"snapi: error: received scan packet %d/%d with codeType %04x, expected %04x",
+				packet.packetIndex + 1, packet.packetCount,
+				packet.codeType, dev.scan.codeType,
+			)
+			dev.clearScan()
+			return
+		}
+	}
+
+	if packet.packetIndex != dev.scan.packetIndex {
+		// TODO: error packet packetIndex mismatch
+		log.Printf(
+			"snapi: error: received scan packet %d/%d, expected %d/%d",
+			packet.packetIndex + 1, packet.packetCount,
+			dev.scan.packetIndex + 1, dev.scan.packetCount,
+		)
+		dev.clearScan()
+		return
+	}
+
+	dev.scan.packetIndex++
+	dev.scan.data = append(dev.scan.data, packet.data...)
+
+	if dev.scan.packetIndex >= dev.scan.packetCount {
+		log.Printf(
+			"snapi: debug: scan complete: code type %04x, length %d\n%s",
+			dev.scan.codeType, len(dev.scan.data), hex.Dump(dev.scan.data),
+		)
+
+		dev.EventChan <- ScanEvent{
+			CodeType: dev.scan.codeType,
+			Data:     dev.scan.data,
+		}
+
+		dev.clearScan()
+	}
 }
 
 func (dev *Device) readLoop() {
@@ -122,81 +193,26 @@ func (dev *Device) readLoop() {
 			}
 
 		case inMsgScan:
-			dev.scanChan <- scanMsg{
+			dev.handleScan(scanPacket{
 				packetCount: uint16(report[1]),
 				packetIndex: uint16(report[2]),
 				codeType:    binary.LittleEndian.Uint16(report[4:]),
 				data:        report[6 : 6+report[3]],
-			}
-			log.Println("snapi: debug: sending ACK")
+			})
 			dev.writeAck(cmdId)
-			log.Println("snapi: debug: ACK done")
 
 		case inMsgScanLarge:
-			dev.scanChan <- scanMsg{
+			dev.handleScan(scanPacket{
 				packetCount: binary.BigEndian.Uint16(report[1:]),
 				packetIndex: binary.BigEndian.Uint16(report[3:]),
 				codeType:    binary.LittleEndian.Uint16(report[6:]),
 				data:        report[8 : 8+report[5]],
-			}
-			log.Println("snapi: debug: sending ACK")
+			})
 			dev.writeAck(cmdId)
-			log.Println("snapi: debug: ACK done")
 
 		default:
 			log.Println("snapi: warning: received unknown report", cmdId)
 		}
-	}
-}
-
-func (dev *Device) scanLoop() {
-scan:
-	for {
-		packet := <- dev.scanChan
-		codeType := packet.codeType
-		packetCount := packet.packetCount
-		buffer := make([]byte, 0, len(packet.data)*int(packet.packetCount))
-
-		for packetIndex := uint16(0); packetIndex < packetCount; packetIndex++ {
-			log.Printf(
-				"snapi: debug: received scan packet %d/%d, codeType %04x, size %d\n%s",
-				packet.packetIndex + 1, packet.packetCount, packet.codeType,
-				len(packet.data), hex.Dump(packet.data),
-			)
-
-			if packet.packetIndex != packetIndex || packet.packetCount != packetCount {
-				// TODO: error packet received out-of-order
-				log.Printf(
-					"snapi: error: received scan packet %d/%d, expected %d/%d",
-					packet.packetIndex + 1, packet.packetCount,
-					packetIndex + 1, packetCount,
-				)
-				continue scan
-			}
-
-			if packet.codeType != codeType {
-				// TODO: error packet codeType mismatch
-				log.Printf(
-					"snapi: error: received scan packet %d/%d with codeType %04x, expected %04x",
-					packet.packetIndex + 1, packet.packetCount,
-					packet.codeType, codeType,
-				)
-				continue scan
-			}
-
-			buffer = append(buffer, packet.data...)
-			packet = <- dev.scanChan
-		}
-
-		log.Printf(
-			"snapi: debug: scan complete: code type %04x, length %d\n%s",
-			codeType, len(buffer), hex.Dump(buffer),
-		)
-
-		//dev.EventChan <- ScanEvent{
-		//	codeType: codeType,
-		//	data:     buffer,
-		//}
 	}
 }
 
