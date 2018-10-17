@@ -9,12 +9,12 @@ import (
 
 type Server struct {
 	ListenAddress string
-	broadcastChan chan interface{}
-	subscribeChan chan chan interface{}
+	broadcastChan chan []byte
+	subscribeChan chan chan []byte
 }
 
 func (self *Server) socketEventLoop(conn *websocket.Conn) {
-	eventChan := make(chan interface{})
+	eventChan := make(chan []byte)
 	self.subscribeChan <- eventChan
 
 	log.WithFields(log.Fields{
@@ -29,13 +29,13 @@ func (self *Server) socketEventLoop(conn *websocket.Conn) {
 			"remoteAddr": conn.RemoteAddr(),
 		}).Debug("WS write loop received event")
 
-		conn.WriteJSON(event)
+		conn.WriteMessage(websocket.TextMessage, event)
 	}
 }
 
 func (self *Server) Serve() {
-	self.broadcastChan = make(chan interface{})
-	self.subscribeChan = make(chan chan interface{})
+	self.broadcastChan = make(chan []byte)
+	self.subscribeChan = make(chan chan []byte)
 
 	upgrader := websocket.Upgrader{}
 
@@ -67,7 +67,7 @@ func (self *Server) Serve() {
 }
 
 func (self *Server) broadcastLoop() {
-	subs := make(map[chan interface{}]bool)
+	subs := make(map[chan []byte]bool)
 	for {
 		log.Debug("enter broadcastLoop")
 		select {
@@ -84,6 +84,6 @@ func (self *Server) broadcastLoop() {
 	}
 }
 
-func (self *Server) Broadcast(msg interface{}) {
+func (self *Server) Broadcast(msg []byte) {
 	self.broadcastChan <- msg
 }

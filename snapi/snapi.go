@@ -51,8 +51,10 @@ type ackMsg struct {
 }
 
 type ScanEvent struct {
-	CodeType string
-	Data     []byte
+	PrimaryType      string
+	PrimaryData      []byte
+	SupplementalType string
+	SupplementalData []byte
 }
 
 type scanPacket struct {
@@ -150,17 +152,28 @@ func (dev *Device) handleScan(packet scanPacket) {
 			}).Debug("scan complete")
 		}
 
-		codeType, hit := codeTypes[dev.scan.codeType]
+		codeType, hit := CodeTypeTable[dev.scan.codeType]
 		if !hit {
-			codeType = "unknown"
+			codeType = CodeType{"unknown", ""}
 			log.WithFields(log.Fields{
 				"codeType": dev.scan.codeType,
 			}).Warn("received unknown codeType")
 		}
 
+		primaryData := dev.scan.data
+		var supplementalData []byte
+
+		primaryLen, hit := PrimaryLengthTable[codeType.primary]
+		if hit {
+			supplementalData = primaryData[primaryLen:]
+			primaryData = primaryData[:primaryLen]
+		}
+
 		dev.EventChan <- ScanEvent{
-			CodeType: codeType,
-			Data:     dev.scan.data,
+			PrimaryType:      codeType.primary,
+			PrimaryData:      primaryData,
+			SupplementalType: codeType.supplemental,
+			SupplementalData: supplementalData,
 		}
 
 		dev.clearScan()

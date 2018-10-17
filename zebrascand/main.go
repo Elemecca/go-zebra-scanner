@@ -1,10 +1,20 @@
 package main
 
 import (
+	"encoding/json"
 	"github.com/elemecca/go-zebra-scanner/snapi"
 	log "github.com/sirupsen/logrus"
 	"os"
 )
+
+func isAsciiPrintable(s []byte) bool {
+	for _, c := range s {
+		if c < 32 || c > 126 {
+			return false
+		}
+	}
+	return true
+}
 
 func main() {
 	if os.Getenv("ZSDEBUG") != "" {
@@ -30,6 +40,35 @@ func main() {
 	}
 	go server.Serve()
 	for {
-		server.Broadcast(<-dev.EventChan)
+		switch event := (<-dev.EventChan).(type) {
+		case snapi.ScanEvent:
+			msg := map[string]interface{}{
+				"event": "scan",
+				"type":  event.PrimaryType,
+			}
+
+			if isAsciiPrintable(event.PrimaryData) {
+				msg["text"] = string(event.PrimaryData)
+			} else {
+				msg["data"] = event.PrimaryData
+			}
+
+			if event.SupplementalType != "" {
+				sup := map[string]interface{}{
+					"type": event.SupplementalType,
+				}
+
+				if isAsciiPrintable(event.SupplementalData) {
+					sup["text"] = string(event.SupplementalData)
+				} else {
+					sup["data"] = event.SupplementalData
+				}
+
+				msg["supplemental"] = sup
+			}
+
+			code, _ := json.Marshal(msg)
+			server.Broadcast(code)
+		}
 	}
 }
