@@ -183,11 +183,21 @@ func (dev *Device) handleScan(packet scanPacket) {
 func (dev *Device) readLoop() {
 	for {
 		report := make([]byte, maxReportSize)
-		_, err := dev.hid.Read(report)
+		size, err := dev.hid.Read(report)
 		if err != nil {
 			// FIXME: signal error and close device
 			log.Error("HID read failed:", err)
 			continue
+		}
+
+		// the device sends empty reports sometimes, ignore them
+		if size < 1 {
+			log.Debug("received empty HID report")
+			continue
+		} else {
+			log.WithFields(log.Fields{
+				"data": report[:size],
+			}).Debug("received HID report")
 		}
 
 		cmdId := report[0]
