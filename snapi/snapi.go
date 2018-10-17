@@ -2,10 +2,8 @@ package snapi
 
 import (
 	"encoding/binary"
-	"encoding/hex"
-	//"errors"
 	"github.com/karalabe/hid"
-	"log"
+	log "github.com/sirupsen/logrus"
 )
 
 const maxReportSize = 64
@@ -79,10 +77,10 @@ func (info DeviceInfo) Open() (*Device, error) {
 	}
 
 	dev := &Device{
-		hid:         hidDev,
-		EventChan:   make(chan interface{}, 20),
-		ackInChan:   make(chan ackMsg),
-		ackOutChan:  make(chan []byte),
+		hid:        hidDev,
+		EventChan:  make(chan interface{}, 20),
+		ackInChan:  make(chan ackMsg),
+		ackOutChan: make(chan []byte),
 	}
 
 	go dev.readLoop()
@@ -107,49 +105,36 @@ func (dev *Device) clearScan() {
 }
 
 func (dev *Device) handleScan(packet scanPacket) {
-	log.Printf(
-		"snapi: debug: received scan packet %d/%d, codeType %04x, size %d\n%s",
-		packet.packetIndex + 1, packet.packetCount, packet.codeType,
-		len(packet.data), hex.Dump(packet.data),
-	)
+	if log.IsLevelEnabled(log.DebugLevel) {
+		log.WithFields(log.Fields{
+			"packetCount": packet.packetCount,
+			"packetIndex": packet.packetIndex,
+			"codeType":    packet.codeType,
+			"data":        packet.data,
+		}).Debug("received scan packet")
+	}
 
 	if dev.scan.data == nil {
-		log.Println("snapi: debug: starting new scan")
+		log.Debug("starting new scan")
 		dev.scan.packetCount = packet.packetCount
 		dev.scan.packetIndex = 0
 		dev.scan.codeType = packet.codeType
 		dev.scan.data = make([]byte, 0, int(packet.packetCount)*len(packet.data))
-	} else {
-		if packet.packetCount != dev.scan.packetCount {
-			// TODO: error packet packetCount mismatch
-			log.Printf(
-				"snapi: error: received scan packet %d/%d, expected %d/%d",
-				packet.packetIndex + 1, packet.packetCount,
-				dev.scan.packetIndex + 1, dev.scan.packetCount,
-			)
-			dev.clearScan()
-			return
-		}
-
-		if packet.codeType != dev.scan.codeType {
-			// TODO: error packet codeType mismatch
-			log.Printf(
-				"snapi: error: received scan packet %d/%d with codeType %04x, expected %04x",
-				packet.packetIndex + 1, packet.packetCount,
-				packet.codeType, dev.scan.codeType,
-			)
-			dev.clearScan()
-			return
-		}
 	}
 
-	if packet.packetIndex != dev.scan.packetIndex {
-		// TODO: error packet packetIndex mismatch
-		log.Printf(
-			"snapi: error: received scan packet %d/%d, expected %d/%d",
-			packet.packetIndex + 1, packet.packetCount,
-			dev.scan.packetIndex + 1, dev.scan.packetCount,
-		)
+	// grumble. can't wrap this to my satisfaction in the if itself in Go.
+	bad := packet.packetCount != dev.scan.packetCount ||
+		packet.packetIndex != dev.scan.packetIndex ||
+		packet.codeType != dev.scan.codeType
+	if bad {
+		log.WithFields(log.Fields{
+			"expectPacketCount": dev.scan.packetCount,
+			"expectPacketIndex": dev.scan.packetIndex,
+			"actualPacketCount": packet.packetCount,
+			"actualPacketIndex": packet.packetIndex,
+			"expectCodeType":    dev.scan.codeType,
+			"actualCodeType":    packet.codeType,
+		}).Warn("received unexpected scan packet, resetting scan")
 		dev.clearScan()
 		return
 	}
@@ -158,10 +143,12 @@ func (dev *Device) handleScan(packet scanPacket) {
 	dev.scan.data = append(dev.scan.data, packet.data...)
 
 	if dev.scan.packetIndex >= dev.scan.packetCount {
-		log.Printf(
-			"snapi: debug: scan complete: code type %04x, length %d\n%s",
-			dev.scan.codeType, len(dev.scan.data), hex.Dump(dev.scan.data),
-		)
+		if log.IsLevelEnabled(log.DebugLevel) {
+			log.WithFields(log.Fields{
+				"codeType": dev.scan.codeType,
+				"data":     dev.scan.data,
+			}).Debug("scan complete")
+		}
 
 		dev.EventChan <- ScanEvent{
 			CodeType: dev.scan.codeType,
@@ -177,9 +164,9 @@ func (dev *Device) readLoop() {
 		report := make([]byte, maxReportSize)
 		_, err := dev.hid.Read(report)
 		if err != nil {
-			log.Println("snapi: error: HID read failed:", err.Error())
-			log.Println("snapi: read loop shutting down")
-			break
+			// FIXME: signal error and close device
+			log.Error("HID read failed:", err)
+			continue
 		}
 
 		cmdId := report[0]
@@ -211,7 +198,9 @@ func (dev *Device) readLoop() {
 			dev.writeAck(cmdId)
 
 		default:
-			log.Println("snapi: warning: received unknown report", cmdId)
+			log.WithFields(log.Fields{
+				"commandId": cmdId,
+			}).Warn("received unrecognized report")
 		}
 	}
 }
@@ -220,22 +209,26 @@ func (dev *Device) writeLoop() {
 	for {
 		var msg []byte
 		select {
-		case msg = <- dev.ackOutChan:
+		case msg = <-dev.ackOutChan:
 		}
 
-		log.Printf(
-			"snapi: debug: sending command: length %d\n%s",
-			len(msg), hex.Dump(msg),
-		)
+		if log.IsLevelEnabled(log.DebugLevel) {
+			log.WithFields(log.Fields{
+				"length": len(msg),
+				"data":   msg,
+			}).Debug("sending command")
+		}
 
 		count, err := dev.hid.Write(msg)
 		if err != nil {
-			log.Println("snapi: error: write failed:", err.Error())
+			// FIXME: signal error and close device
+			log.Error("HID write failed:", err)
 		} else if count != len(msg) {
-			log.Printf(
-				"snapi: error: write length mismatch: expected %d, wrote %d",
-				len(msg), count,
-			)
+			// FIXME: signal error and close device
+			log.WithFields(log.Fields{
+				"expectLength": len(msg),
+				"actualLength": count,
+			}).Error("HID write length mismatch")
 		}
 	}
 }

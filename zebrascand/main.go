@@ -1,33 +1,38 @@
 package main
 
 import (
-	"encoding/hex"
 	"github.com/elemecca/go-zebra-scanner/snapi"
-	"log"
+	log "github.com/sirupsen/logrus"
+	"os"
 )
 
 func main() {
+	if os.Getenv("ZSDEBUG") != "" {
+		log.SetLevel(log.DebugLevel)
+		log.SetFormatter(&debugTextFormatter{&log.TextFormatter{}})
+	}
+
 	devs := snapi.Enumerate()
 	if len(devs) < 1 {
-		log.Println("main: error: no devices found")
+		log.Error("no devices found")
 		return
 	}
 
 	dev, err := devs[0].Open()
 	if err != nil {
-		log.Println("main: error: device open failed:", err.Error())
+		log.Error("device open failed:", err)
 		return
 	}
 
-	log.Println("main: info: device opened, running")
+	log.Info("device opened, running")
 	for {
-		event := <- dev.EventChan
+		event := <-dev.EventChan
 		switch event := event.(type) {
 		case snapi.ScanEvent:
-			log.Printf(
-				"main: scan complete: code type %04x, length %d\n%s",
-				event.CodeType, len(event.Data), hex.Dump(event.Data),
-			)
+			log.WithFields(log.Fields{
+				"codeType": event.CodeType,
+				"data":     event.Data,
+			}).Debug("scanned")
 		}
 	}
 }
