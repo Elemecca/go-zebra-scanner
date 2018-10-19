@@ -10,7 +10,7 @@ type debugTextFormatter struct {
 	next log.Formatter
 }
 
-func (self *debugTextFormatter) Format(entry *log.Entry) ([]byte, error) {
+func (f *debugTextFormatter) Format(entry *log.Entry) ([]byte, error) {
 	delay := make(map[string][]byte)
 	for name, value := range entry.Data {
 		switch data := value.(type) {
@@ -20,7 +20,7 @@ func (self *debugTextFormatter) Format(entry *log.Entry) ([]byte, error) {
 		}
 	}
 	var res []byte
-	res, err := self.next.Format(entry)
+	res, err := f.next.Format(entry)
 	if err != nil {
 		return res, err
 	}

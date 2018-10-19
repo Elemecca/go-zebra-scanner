@@ -31,10 +31,12 @@ const (
 	statusTimeout     = 0xD
 )
 
+// DeviceInfo represents a device discovered from enumeration.
 type DeviceInfo struct {
 	hid hid.DeviceInfo
 }
 
+// Enumerate lists supported devices currently connected.
 func Enumerate() []DeviceInfo {
 	devs := hid.Enumerate(0x05e0, 0x1900)
 	out := make([]DeviceInfo, 0, len(devs))
@@ -50,6 +52,7 @@ type ackMsg struct {
 	param  byte
 }
 
+// ScanEvent encodes the results of a successful scan.
 type ScanEvent struct {
 	PrimaryType      string
 	PrimaryData      []byte
@@ -64,6 +67,7 @@ type scanPacket struct {
 	data        []byte
 }
 
+// Device represents a device that has been opened.
 type Device struct {
 	hid        *hid.Device
 	EventChan  chan interface{}
@@ -72,6 +76,7 @@ type Device struct {
 	scan       scanPacket
 }
 
+// Open prepares the device represented by a DeviceInfo for use.
 func (info DeviceInfo) Open() (*Device, error) {
 	hidDev, err := info.hid.Open()
 	if err != nil {
@@ -163,7 +168,7 @@ func (dev *Device) handleScan(packet scanPacket) {
 		primaryData := dev.scan.data
 		var supplementalData []byte
 
-		primaryLen, hit := PrimaryLengthTable[codeType.primary]
+		primaryLen, hit := primaryLengthTable[codeType.primary]
 		if hit {
 			supplementalData = primaryData[primaryLen:]
 			primaryData = primaryData[:primaryLen]

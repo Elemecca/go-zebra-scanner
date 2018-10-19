@@ -1,21 +1,21 @@
 package main
 
 import (
-	//"github.com/elemecca/go-zebra-scanner/snapi"
 	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
 	"net/http"
 )
 
+// Server encapsulates the Websocket server component.
 type Server struct {
 	ListenAddress string
 	broadcastChan chan []byte
 	subscribeChan chan chan []byte
 }
 
-func (self *Server) socketEventLoop(conn *websocket.Conn) {
+func (s *Server) socketEventLoop(conn *websocket.Conn) {
 	eventChan := make(chan []byte)
-	self.subscribeChan <- eventChan
+	s.subscribeChan <- eventChan
 
 	log.WithFields(log.Fields{
 		"remoteAddr": conn.RemoteAddr(),
@@ -33,9 +33,11 @@ func (self *Server) socketEventLoop(conn *websocket.Conn) {
 	}
 }
 
-func (self *Server) Serve() {
-	self.broadcastChan = make(chan []byte)
-	self.subscribeChan = make(chan chan []byte)
+// Serve starts up the server and blocks indefinitely to serve requests.
+// This should generally be called as a goroutine.
+func (s *Server) Serve() {
+	s.broadcastChan = make(chan []byte)
+	s.subscribeChan = make(chan chan []byte)
 
 	upgrader := websocket.Upgrader{}
 
@@ -54,29 +56,29 @@ func (self *Server) Serve() {
 			"remoteAddr": conn.RemoteAddr(),
 		}).Info("accepted WS connection")
 
-		go self.socketEventLoop(conn)
+		go s.socketEventLoop(conn)
 	})
 
 	server := http.Server{
-		Addr:    self.ListenAddress,
+		Addr:    s.ListenAddress,
 		Handler: &route,
 	}
 
-	go self.broadcastLoop()
+	go s.broadcastLoop()
 	server.ListenAndServe()
 }
 
-func (self *Server) broadcastLoop() {
+func (s *Server) broadcastLoop() {
 	subs := make(map[chan []byte]bool)
 	for {
 		log.Debug("enter broadcastLoop")
 		select {
-		case sub := <-self.subscribeChan:
+		case sub := <-s.subscribeChan:
 			log.Debug("register subscriber ", sub)
 			subs[sub] = true
 
-		case msg := <-self.broadcastChan:
-			for sub, _ := range subs {
+		case msg := <-s.broadcastChan:
+			for sub := range subs {
 				log.Debug("broadcast subscriber ", sub)
 				sub <- msg
 			}
@@ -84,6 +86,7 @@ func (self *Server) broadcastLoop() {
 	}
 }
 
-func (self *Server) Broadcast(msg []byte) {
-	self.broadcastChan <- msg
+// Broadcast sends a message to all connected clients.
+func (s *Server) Broadcast(msg []byte) {
+	s.broadcastChan <- msg
 }

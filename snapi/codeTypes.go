@@ -1,10 +1,13 @@
 package snapi
 
+// CodeType provides string IDs for the primary and (optionally)
+// secondary symbologies in a symbol.
 type CodeType struct {
 	primary      string
 	supplemental string
 }
 
+// CodeTypeTable maps SNAPI codeType ID values to CodeType instances.
 var CodeTypeTable = map[uint16]CodeType{
 	1:  {"code39", ""},
 	2:  {"codabar", ""},
@@ -95,7 +98,7 @@ var CodeTypeTable = map[uint16]CodeType{
 	154: {"macro-micropdf", ""},
 }
 
-var PrimaryLengthTable = map[string]int{
+var primaryLengthTable = map[string]int{
 	"ean-8":       8,
 	"ean-13":      13,
 	"rss-14":      16,
