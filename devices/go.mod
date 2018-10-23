@@ -8,4 +8,4 @@ require (
 
 replace github.com/elemecca/go-zebra-scanner/snapi => ../snapi
 
-replace github.com/google/gousb => ../vendor/gousb
+replace github.com/google/gousb => ../vendor/github.com/google/gousb
