@@ -1,0 +1,3 @@
+[submodule "vendor/gousb"]
+	path = vendor/gousb
+	url = git://github.com/elemecca/gousb.git

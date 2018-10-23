@@ -2,12 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"github.com/elemecca/go-zebra-scanner/devices"
 	"github.com/elemecca/go-zebra-scanner/snapi"
 	log "github.com/sirupsen/logrus"
 	"os"
 )
 
-func isAsciiPrintable(s []byte) bool {
+func isASCIIPrintable(s []byte) bool {
 	for _, c := range s {
 		if c < 32 || c > 126 {
 			return false
@@ -22,32 +24,28 @@ func main() {
 		log.SetFormatter(&debugTextFormatter{&log.TextFormatter{}})
 	}
 
-	devs := snapi.Enumerate()
-	if len(devs) < 1 {
-		log.Error("no devices found")
-		return
-	}
-
-	dev, err := devs[0].Open()
+	eventChan := make(chan interface{}, 10)
+	dm, err := devices.NewDeviceManager(eventChan)
 	if err != nil {
-		log.Error("device open failed:", err)
-		return
+		log.Error("failed to start device manager: ", err)
+		os.Exit(2)
 	}
+	defer dm.Close()
 
-	log.Info("device opened, running")
 	server := Server{
 		ListenAddress: "localhost:4141",
 	}
 	go server.Serve()
+
 	for {
-		switch event := (<-dev.EventChan).(type) {
+		switch event := (<-eventChan).(type) {
 		case snapi.ScanEvent:
 			msg := map[string]interface{}{
 				"event": "scan",
 				"type":  event.PrimaryType,
 			}
 
-			if isAsciiPrintable(event.PrimaryData) {
+			if isASCIIPrintable(event.PrimaryData) {
 				msg["text"] = string(event.PrimaryData)
 			} else {
 				msg["data"] = event.PrimaryData
@@ -58,7 +56,7 @@ func main() {
 					"type": event.SupplementalType,
 				}
 
-				if isAsciiPrintable(event.SupplementalData) {
+				if isASCIIPrintable(event.SupplementalData) {
 					sup["text"] = string(event.SupplementalData)
 				} else {
 					sup["data"] = event.SupplementalData
@@ -69,6 +67,9 @@ func main() {
 
 			code, _ := json.Marshal(msg)
 			server.Broadcast(code)
+
+		default:
+			log.Debug(fmt.Sprintf("main loop received unknown event %T", event))
 		}
 	}
 }
