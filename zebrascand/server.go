@@ -39,22 +39,26 @@ func (s *Server) Serve() {
 	s.broadcastChan = make(chan []byte)
 	s.subscribeChan = make(chan chan []byte)
 
-	upgrader := websocket.Upgrader{}
+	upgrader := websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			// FIXME: for now, accept any origin
+			return true
+		},
+	}
 
 	route := http.ServeMux{}
-
 	route.HandleFunc("/scan", func(w http.ResponseWriter, r *http.Request) {
+		log := log.WithFields(log.Fields{
+			"remoteAddr": r.RemoteAddr,
+		})
+
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			log.WithFields(log.Fields{
-				"remoteAddr": conn.RemoteAddr(),
-			}).Error("failed to upgrade to WS: ", err)
+			log.WithError(err).Error("server: failed to upgrade to WS")
 			return
 		}
 
-		log.WithFields(log.Fields{
-			"remoteAddr": conn.RemoteAddr(),
-		}).Info("accepted WS connection")
+		log.Info("server: accepted WS connection")
 
 		go s.socketEventLoop(conn)
 	})
@@ -71,15 +75,12 @@ func (s *Server) Serve() {
 func (s *Server) broadcastLoop() {
 	subs := make(map[chan []byte]bool)
 	for {
-		log.Debug("enter broadcastLoop")
 		select {
 		case sub := <-s.subscribeChan:
-			log.Debug("register subscriber ", sub)
 			subs[sub] = true
 
 		case msg := <-s.broadcastChan:
 			for sub := range subs {
-				log.Debug("broadcast subscriber ", sub)
 				sub <- msg
 			}
 		}
