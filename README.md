@@ -1,10 +1,7 @@
-# Zebra/Symbol/Motorola Barcode Scanner Daemon
+# Zebra/Symbol/Motorola Barcode Scanner Driver
 
 This project provides client software for barcode scanners made by
 Zebra (or their earlier incarnations Symbol or Motorola).
-
-`zebrascand` is a Websocket server which exposes connected barcode
-scanners to web applications.
 
 The `snapi` package is a Go interface to Zebra's proprietary SNAPI
 protocol.
@@ -12,7 +9,7 @@ protocol.
 
 ## Copying
 
-Copyright 2018 Sam Hanes
+Copyright 2023 Sam Hanes
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
