@@ -3,8 +3,8 @@ package snapi
 import (
 	"encoding/binary"
 	"errors"
-	"github.com/google/gousb"
 	log "github.com/sirupsen/logrus"
+	"github.com/sstallion/go-hid"
 )
 
 // UsbVid is the USB idVendor value for SNAPI devices
@@ -53,11 +53,7 @@ type DeviceClosedEvent struct {
 
 // Device represents a device that has been opened.
 type Device struct {
-	usbDev    *gousb.Device
-	usbConfig *gousb.Config
-	hidIface  *gousb.Interface
-	hidIn     *gousb.InEndpoint
-
+	hidDev    hid.Device
 	eventChan chan<- interface{}
 
 	scan       scanPacket
@@ -70,17 +66,22 @@ type Device struct {
 	log *log.Entry
 }
 
-// OpenUsbDevice connects to a gousb Device
-func OpenUsbDevice(
-	usbDev *gousb.Device,
+// OpenDevice connects to an HID Device
+func OpenDevice(
+	hidDev hid.Device,
 	eventChan chan<- interface{},
 ) (*Device, error) {
-	if usbDev.Desc.Vendor != UsbVid || usbDev.Desc.Product != UsbPid {
+	hidInfo, err := hidDev.GetDeviceInfo()
+	if err != nil {
+		return nil, err
+	}
+
+	if hidInfo.VendorID != UsbVid || hidInfo.ProductID != UsbPid {
 		return nil, errors.New("given device is not a SNAPI device")
 	}
 
 	dev := &Device{
-		usbDev:     usbDev,
+		hidDev:     hidDev,
 		eventChan:  eventChan,
 		closeChan:  make(chan bool, 5),
 		ackInChan:  make(chan ackMsg),
@@ -88,56 +89,9 @@ func OpenUsbDevice(
 	}
 
 	dev.log = log.WithFields(log.Fields{
-		"bus":     usbDev.Desc.Bus,
-		"address": usbDev.Desc.Address,
+		"product": hidInfo.ProductStr,
+		"serial":  hidInfo.SerialNbr,
 	})
-
-	err := usbDev.SetAutoDetach(true)
-	if err != nil {
-		return nil, err
-	}
-
-	configID, err := usbDev.ActiveConfigNum()
-	if err != nil {
-		return nil, err
-	}
-
-	dev.usbConfig, err = usbDev.Config(configID)
-	if err != nil {
-		return nil, err
-	}
-
-	// find and claim the HID interface
-	for _, iface := range dev.usbConfig.Desc.Interfaces {
-		for _, alt := range iface.AltSettings {
-			if alt.Class == 3 /* HID */ {
-				dev.hidIface, err = dev.usbConfig.Interface(iface.Number, alt.Number)
-				if err != nil {
-					return nil, err
-				}
-				break
-			}
-		}
-	}
-	if dev.hidIface == nil {
-		return nil, errors.New("HID interface not found")
-	}
-
-	// find and claim the HID interrupt in endpoint
-	for _, ep := range dev.hidIface.Setting.Endpoints {
-		if ep.TransferType == gousb.TransferTypeInterrupt {
-			if ep.Direction == gousb.EndpointDirectionIn {
-				dev.hidIn, err = dev.hidIface.InEndpoint(ep.Number)
-				if err != nil {
-					return nil, err
-				}
-				break
-			}
-		}
-	}
-	if dev.hidIn == nil {
-		return nil, errors.New("HID interrupt IN endpoint not found")
-	}
 
 	go dev.readLoop()
 	go dev.writeLoop()
@@ -158,7 +112,7 @@ func (dev *Device) writeAck(cmdID byte) {
 func (dev *Device) readLoop() {
 	for {
 		report := make([]byte, maxReportSize)
-		size, err := dev.hidIn.Read(report)
+		size, err := dev.hidDev.Read(report)
 		if err != nil {
 			if !dev.closing {
 				dev.log.WithError(err).Warn("snapi: HID read failed")
@@ -231,13 +185,7 @@ func (dev *Device) writeLoop() {
 			}).Debug("snapi: sending command")
 		}
 
-		count, err := dev.usbDev.Control(
-			0x21,                                // bmRequestType
-			0x09,                                // bRequest = SET_REPORT
-			0x0200,                              // wValue = Output Report
-			uint16(dev.hidIface.Setting.Number), // wIndex
-			msg,                                 // Data
-		)
+		count, err := dev.hidDev.Write(msg)
 		if err != nil {
 			dev.log.WithError(err).Error("snapi: HID write failed")
 		} else if count != len(msg) {
@@ -252,9 +200,8 @@ func (dev *Device) writeLoop() {
 func (dev *Device) closeInternal() {
 	dev.log.Debug("snapi: closing device")
 	dev.closing = true
-	dev.hidIface.Close()
 
-	err := dev.usbConfig.Close()
+	err := dev.hidDev.Close()
 	if err != nil {
 		dev.log.WithError(err).Warn("snapi: closing USB config failed")
 	}
