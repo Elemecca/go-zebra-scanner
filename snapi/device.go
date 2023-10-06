@@ -53,7 +53,7 @@ type DeviceClosedEvent struct {
 
 // Device represents a device that has been opened.
 type Device struct {
-	hidDev    hid.Device
+	hidDev    *hid.Device
 	eventChan chan<- interface{}
 
 	scan       scanPacket
@@ -68,7 +68,7 @@ type Device struct {
 
 // OpenDevice connects to an HID Device
 func OpenDevice(
-	hidDev hid.Device,
+	hidDev *hid.Device,
 	eventChan chan<- interface{},
 ) (*Device, error) {
 	hidInfo, err := hidDev.GetDeviceInfo()
@@ -210,9 +210,9 @@ func (dev *Device) closeInternal() {
 }
 
 // Close requests that the device resources be released.
-// The request is queued and will not necessary be handled immediately.
+// The request is queued and will not necessarily be handled immediately.
 // A DeviceClosedEvent will be sent to the event channel when the device
-// has been closed.
+// has been closed. The underlying HID device will also be closed.
 func (dev *Device) Close() {
 	dev.closeChan <- true
 }
