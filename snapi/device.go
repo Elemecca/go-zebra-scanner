@@ -3,8 +3,8 @@ package snapi
 import (
 	"encoding/binary"
 	"errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/sstallion/go-hid"
+	"log/slog"
 )
 
 // UsbVid is the USB idVendor value for SNAPI devices
@@ -63,7 +63,7 @@ type Device struct {
 	closeChan chan bool
 	closing   bool
 
-	log *log.Entry
+	log *slog.Logger
 }
 
 // OpenDevice connects to an HID Device
@@ -88,10 +88,10 @@ func OpenDevice(
 		ackOutChan: make(chan []byte),
 	}
 
-	dev.log = log.WithFields(log.Fields{
-		"product": hidInfo.ProductStr,
-		"serial":  hidInfo.SerialNbr,
-	})
+	dev.log = log.With(
+		"product", hidInfo.ProductStr,
+		"serial", hidInfo.SerialNbr,
+	)
 
 	go dev.readLoop()
 	go dev.writeLoop()
@@ -115,7 +115,7 @@ func (dev *Device) readLoop() {
 		size, err := dev.hidDev.Read(report)
 		if err != nil {
 			if !dev.closing {
-				dev.log.WithError(err).Warn("snapi: HID read failed")
+				dev.log.Warn("snapi: HID read failed", "error", err)
 				dev.closeChan <- true
 			}
 			return
@@ -126,9 +126,7 @@ func (dev *Device) readLoop() {
 			dev.log.Debug("snapi: received empty HID report")
 			continue
 		} else {
-			dev.log.WithFields(log.Fields{
-				"data": report[:size],
-			}).Debug("snapi: received HID report")
+			dev.log.Debug("snapi: received HID report", "data", report[:size])
 		}
 
 		cmdID := report[0]
@@ -160,9 +158,7 @@ func (dev *Device) readLoop() {
 			dev.writeAck(cmdID)
 
 		default:
-			dev.log.WithFields(log.Fields{
-				"commandId": cmdID,
-			}).Warn("snapi: received unrecognized report")
+			dev.log.Warn("snapi: received unrecognized report", "commandId", cmdID)
 		}
 	}
 }
@@ -178,21 +174,17 @@ func (dev *Device) writeLoop() {
 		case msg = <-dev.ackOutChan:
 		}
 
-		if log.IsLevelEnabled(log.DebugLevel) {
-			dev.log.WithFields(log.Fields{
-				"length": len(msg),
-				"data":   msg,
-			}).Debug("snapi: sending command")
-		}
+		dev.log.Debug("snapi: sending command", "length", len(msg), "data", msg)
 
 		count, err := dev.hidDev.Write(msg)
 		if err != nil {
-			dev.log.WithError(err).Error("snapi: HID write failed")
+			dev.log.Error("snapi: HID write failed", "error", err)
 		} else if count != len(msg) {
-			dev.log.WithFields(log.Fields{
-				"expectLength": len(msg),
-				"actualLength": count,
-			}).Error("snapi: HID write length mismatch")
+			dev.log.Error(
+				"snapi: HID write length mismatch",
+				"expectLength", len(msg),
+				"actualLength", count,
+			)
 		}
 	}
 }
@@ -203,7 +195,7 @@ func (dev *Device) closeInternal() {
 
 	err := dev.hidDev.Close()
 	if err != nil {
-		dev.log.WithError(err).Warn("snapi: closing USB config failed")
+		dev.log.Warn("snapi: closing USB config failed", "error", err)
 	}
 
 	dev.eventChan <- DeviceClosedEvent{dev}
@@ -215,4 +207,10 @@ func (dev *Device) closeInternal() {
 // has been closed. The underlying HID device will also be closed.
 func (dev *Device) Close() {
 	dev.closeChan <- true
+}
+
+var log = slog.Default()
+
+func SetLogger(logger *slog.Logger) {
+	log = logger
 }

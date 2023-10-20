@@ -1,9 +1,5 @@
 package snapi
 
-import (
-	log "github.com/sirupsen/logrus"
-)
-
 // ScanEvent encodes the results of a successful scan.
 type ScanEvent struct {
 	PrimaryType      string
@@ -27,14 +23,13 @@ func (dev *Device) clearScan() {
 }
 
 func (dev *Device) handleScan(packet scanPacket) {
-	if log.IsLevelEnabled(log.DebugLevel) {
-		dev.log.WithFields(log.Fields{
-			"packetCount": packet.packetCount,
-			"packetIndex": packet.packetIndex,
-			"codeType":    packet.codeType,
-			"data":        packet.data,
-		}).Debug("snapi: received scan packet")
-	}
+	dev.log.Debug(
+		"snapi: received scan packet",
+		"packetCount", packet.packetCount,
+		"packetIndex", packet.packetIndex,
+		"codeType", packet.codeType,
+		"data", packet.data,
+	)
 
 	if dev.scan.data == nil {
 		dev.log.Debug("snapi: starting new scan")
@@ -49,14 +44,15 @@ func (dev *Device) handleScan(packet scanPacket) {
 		packet.packetIndex != dev.scan.packetIndex ||
 		packet.codeType != dev.scan.codeType
 	if bad {
-		dev.log.WithFields(log.Fields{
-			"expectPacketCount": dev.scan.packetCount,
-			"expectPacketIndex": dev.scan.packetIndex,
-			"actualPacketCount": packet.packetCount,
-			"actualPacketIndex": packet.packetIndex,
-			"expectCodeType":    dev.scan.codeType,
-			"actualCodeType":    packet.codeType,
-		}).Warn("snapi: received unexpected scan packet, resetting scan")
+		dev.log.Warn(
+			"snapi: received unexpected scan packet, resetting scan",
+			"expectPacketCount", dev.scan.packetCount,
+			"expectPacketIndex", dev.scan.packetIndex,
+			"actualPacketCount", packet.packetCount,
+			"actualPacketIndex", packet.packetIndex,
+			"expectCodeType", dev.scan.codeType,
+			"actualCodeType", packet.codeType,
+		)
 		dev.clearScan()
 		return
 	}
@@ -65,19 +61,19 @@ func (dev *Device) handleScan(packet scanPacket) {
 	dev.scan.data = append(dev.scan.data, packet.data...)
 
 	if dev.scan.packetIndex >= dev.scan.packetCount {
-		if log.IsLevelEnabled(log.DebugLevel) {
-			dev.log.WithFields(log.Fields{
-				"codeType": dev.scan.codeType,
-				"data":     dev.scan.data,
-			}).Debug("snapi: scan complete")
-		}
+		dev.log.Debug(
+			"snapi: scan complete",
+			"codeType", dev.scan.codeType,
+			"data", dev.scan.data,
+		)
 
 		codeType, hit := CodeTypeTable[dev.scan.codeType]
 		if !hit {
 			codeType = CodeType{"unknown", ""}
-			dev.log.WithFields(log.Fields{
-				"codeType": dev.scan.codeType,
-			}).Warn("snapi: received unknown codeType")
+			dev.log.Warn(
+				"snapi: received unknown codeType",
+				"codeType", dev.scan.codeType,
+			)
 		}
 
 		primaryData := dev.scan.data
